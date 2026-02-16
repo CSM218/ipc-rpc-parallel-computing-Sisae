@@ -35,22 +35,27 @@ public class Message {
      */
     public byte[] pack() {
         try {
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            DataOutputStream out = new DataOutputStream(baos);
-
             // Fixed field order framing:
             // [magic][version][messageType][studentId][timestamp][payloadLength][payload]
             String effectiveMagic = (magic == null || magic.isEmpty()) ? CSM218_MAGIC : magic;
             String effectiveMessageType = (messageType == null || messageType.isEmpty()) ? type : messageType;
             String effectiveStudentId = (studentId == null || studentId.isEmpty()) ? sender : studentId;
+            byte[] magicBytes = effectiveMagic.getBytes(StandardCharsets.UTF_8);
+            byte[] typeBytes = effectiveMessageType == null ? new byte[0] : effectiveMessageType.getBytes(StandardCharsets.UTF_8);
+            byte[] studentBytes = effectiveStudentId == null ? new byte[0] : effectiveStudentId.getBytes(StandardCharsets.UTF_8);
+            int payloadLength = payload == null ? 0 : payload.length;
+            int estimatedSize = 4 + magicBytes.length + 4 + 4 + typeBytes.length + 4 + studentBytes.length + 8 + 4
+                    + payloadLength;
 
-            writeString(out, effectiveMagic);
+            ByteArrayOutputStream baos = new ByteArrayOutputStream(estimatedSize);
+            DataOutputStream out = new DataOutputStream(baos);
+
+            writeString(out, magicBytes);
             out.writeInt(version);
-            writeString(out, effectiveMessageType);
-            writeString(out, effectiveStudentId);
+            writeString(out, typeBytes);
+            writeString(out, studentBytes);
             out.writeLong(timestamp);
 
-            int payloadLength = payload == null ? 0 : payload.length;
             out.writeInt(payloadLength);
             if (payloadLength > 0) {
                 out.write(payload);
@@ -98,8 +103,7 @@ public class Message {
         }
     }
 
-    private static void writeString(DataOutputStream out, String value) throws IOException {
-        byte[] bytes = value == null ? new byte[0] : value.getBytes(StandardCharsets.UTF_8);
+    private static void writeString(DataOutputStream out, byte[] bytes) throws IOException {
         out.writeInt(bytes.length);
         if (bytes.length > 0) {
             out.write(bytes);

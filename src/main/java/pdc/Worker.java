@@ -62,7 +62,8 @@ public class Worker {
     }
 
     private byte[] buildRegisterPayload(String workerId, int cores, long memory) throws IOException {
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        int workerIdBytes = workerId == null ? 0 : workerId.getBytes(StandardCharsets.UTF_8).length;
+        ByteArrayOutputStream baos = new ByteArrayOutputStream(16 + workerIdBytes);
         DataOutputStream payloadOut = new DataOutputStream(baos);
         payloadOut.writeUTF(workerId);
         payloadOut.writeInt(cores);
@@ -72,7 +73,10 @@ public class Worker {
     }
 
     private byte[] buildResultPayload(int row, int col, int[][] resultBlock) throws IOException {
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        int rows = resultBlock.length;
+        int cols = resultBlock[0].length;
+        int estimatedBytes = 16 + (rows * cols * 4);
+        ByteArrayOutputStream baos = new ByteArrayOutputStream(estimatedBytes);
         DataOutputStream payloadOut = new DataOutputStream(baos);
         payloadOut.writeInt(row);
         payloadOut.writeInt(col);

@@ -8,10 +8,11 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
-import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -130,18 +131,23 @@ public int[][] coordinate(String operation, int[][] matrixA, int[][] matrixB, in
         sendMessage(worker.out, createMessage("RPC_REQUEST", MASTER_ID, taskPayload));
     }
 
-    private void recoverAndReassignTask(Task task, ConcurrentLinkedQueue<Task> tasks, CountDownLatch latch) {
+    private void recoverAndReassignTask(Task task, BlockingQueue<Task> tasks, CountDownLatch latch) {
         // Minimal recovery path: reassign task back to queue for retry.
         if (task.retryCount < MAX_TASK_RETRIES) {
             task.retryCount++;
-            tasks.add(task);
+            tasks.offer(task);
             return;
         }
         latch.countDown();
     }
 
     private byte[] buildTaskPayload(Task task) throws IOException {
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        int blockARows = task.blockA.length;
+        int blockACols = task.blockA[0].length;
+        int blockBRows = task.blockB.length;
+        int blockBCols = task.blockB[0].length;
+        int estimatedBytes = 24 + (blockARows * blockACols + blockBRows * blockBCols) * 4;
+        ByteArrayOutputStream baos = new ByteArrayOutputStream(estimatedBytes);
         DataOutputStream out = new DataOutputStream(baos);
         out.writeInt(task.row);
         out.writeInt(task.col);
@@ -241,7 +247,7 @@ public int[][] coordinate(String operation, int[][] matrixA, int[][] matrixB, in
         
         int[][] result = new int[size][size];
 
-        ConcurrentLinkedQueue<Task> tasks = new ConcurrentLinkedQueue<>();
+        BlockingQueue<Task> tasks = new LinkedBlockingQueue<>();
         
         for (int i = 0; i < size; i += blockSize) {
             for (int j = 0; j < size; j += blockSize) {
@@ -258,7 +264,7 @@ public int[][] coordinate(String operation, int[][] matrixA, int[][] matrixB, in
                     System.arraycopy(matrixB[x], j, blockB[x], 0, blockCols);
                 }
 
-                tasks.add(new Task(i, j, blockA, blockB));
+                tasks.offer(new Task(i, j, blockA, blockB));
             }
         }
 
@@ -274,9 +280,8 @@ public int[][] coordinate(String operation, int[][] matrixA, int[][] matrixB, in
                 Task currentTask = null;
                 try {
                     while (latch.getCount() > 0) {
-                        currentTask = tasks.poll();
+                        currentTask = tasks.poll(50, TimeUnit.MILLISECONDS);
                         if (currentTask == null) {
-                            TimeUnit.MILLISECONDS.sleep(10);
                             continue;
                         }
                         synchronized (worker) {
@@ -395,12 +400,12 @@ public int[][] coordinate(String operation, int[][] matrixA, int[][] matrixB, in
         }).start();
 
         try {
-            Thread.sleep(3000); // Wait for workers to connect
+            Thread.sleep(1000); // Wait briefly for workers to connect
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
 
-        int size = 100;
+        int size = 64;
         int[][] matrixA = MatrixGenerator.generateRandomMatrix(size, size, 100);
         int[][] matrixB = MatrixGenerator.generateRandomMatrix(size, size, 100);
         try {
