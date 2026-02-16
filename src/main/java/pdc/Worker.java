@@ -155,7 +155,7 @@ public class Worker {
         synchronized (writeLock) {
                  try {
                         byte[] resultPayload = buildResultPayload(row, col, resultBlock);
-                        sendMessage(out, createMessage("RESULT", "WORKER", resultPayload));
+                        sendMessage(out, createMessage("TASK_COMPLETE", "WORKER", resultPayload));
 
                  } catch (IOException e) {  
                      e.printStackTrace();
@@ -173,7 +173,7 @@ public class Worker {
             while (true) {
                 Message message = readMessage(in);
 
-                if ("TASK".equals(message.type)) {
+                if ("TASK".equals(message.type) || "RPC_REQUEST".equals(message.type)) {
                     DataInputStream payloadIn = new DataInputStream(new ByteArrayInputStream(message.payload));
                     int row = payloadIn.readInt();
                     int col = payloadIn.readInt();

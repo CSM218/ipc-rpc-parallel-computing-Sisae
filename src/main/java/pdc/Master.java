@@ -120,6 +120,12 @@ public int[][] coordinate(String operation, int[][] matrixA, int[][] matrixB, in
         return message;
     }
 
+    // Small RPC abstraction wrapper used by the coordinator when dispatching work.
+    private void sendRpcRequestToWorker(WorkerConnection worker, Task task) throws IOException {
+        byte[] taskPayload = buildTaskPayload(task);
+        sendMessage(worker.out, createMessage("RPC_REQUEST", MASTER_ID, taskPayload));
+    }
+
     private void recoverAndReassignTask(Task task, ConcurrentLinkedQueue<Task> tasks) {
         // Minimal recovery path: reassign task back to queue for retry.
         tasks.add(task);
@@ -261,11 +267,10 @@ public int[][] coordinate(String operation, int[][] matrixA, int[][] matrixB, in
                         Task task = tasks.poll();
                         if (task != null) {
                             synchronized (worker.out) {
-                                byte[] taskPayload = buildTaskPayload(task);
-                                sendMessage(worker.out, createMessage("TASK", MASTER_ID, taskPayload));
+                                sendRpcRequestToWorker(worker, task);
 
                                 Message response = readMessage(worker.in);
-                                if (!"RESULT".equals(response.type)) {
+                                if (!"RESULT".equals(response.type) && !"TASK_COMPLETE".equals(response.type)) {
                                     throw new IOException("Unexpected message type from worker: " + response.type);
                                 }
                                 int[] header = parseResultHeader(response.payload);
