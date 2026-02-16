@@ -18,7 +18,6 @@ import java.util.concurrent.Executors;
 public class Worker {
     private static final String MAGIC = Message.CSM218_MAGIC;
     private static final int VERSION = 1;
-    private static final int MAX_FRAME_BYTES = 32 * 1024 * 1024;
 
     private final Object writeLock = new Object();
 // TODO: Implement the cluster join protocol
@@ -29,11 +28,12 @@ public class Worker {
     private int taskLogCount = 0;
     private static final int MAX_TASK_LOGS = 3;
 
-    private final ExecutorService workerThreads = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+    private final ExecutorService workerThreads = Executors
+            .newFixedThreadPool(Math.max(2, Runtime.getRuntime().availableProcessors()));
 
     private Message readMessage(DataInputStream in) throws IOException {
         int frameLength = in.readInt();
-        if (frameLength <= 0 || frameLength > MAX_FRAME_BYTES) {
+        if (frameLength <= 0) {
             throw new IOException("Invalid frame length: " + frameLength);
         }
         byte[] frame = new byte[frameLength];
@@ -213,7 +213,6 @@ public class Worker {
             }
         } catch (IOException e) {
             System.out.println("Connection to Master lost");
-            e.printStackTrace();
         }
     }
 

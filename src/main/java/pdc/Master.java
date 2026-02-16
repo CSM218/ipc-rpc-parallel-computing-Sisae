@@ -29,7 +29,6 @@ public class Master {
     private static final long HEARTBEAT_TIMEOUT_MS = 30000L;
     private static final long HEARTBEAT_INTERVAL_MS = 5000L;
     private static final int MAX_TASK_RETRIES = 3;
-    private static final int MAX_FRAME_BYTES = 32 * 1024 * 1024;
     private static final String HEALTH_PING = "PING";
 
     private final ExecutorService systemThreads = Executors.newCachedThreadPool();
@@ -97,7 +96,7 @@ public int[][] coordinate(String operation, int[][] matrixA, int[][] matrixB, in
 
     private Message readMessage(DataInputStream in) throws IOException {
         int frameLength = in.readInt();
-        if (frameLength <= 0 || frameLength > MAX_FRAME_BYTES) {
+        if (frameLength <= 0) {
             throw new IOException("Invalid frame length: " + frameLength);
         }
         byte[] frame = new byte[frameLength];
@@ -307,7 +306,6 @@ public int[][] coordinate(String operation, int[][] matrixA, int[][] matrixB, in
                         }
                     }
                 } catch (IOException e) {
-                    e.printStackTrace();
                     // Trigger retry/reassign keywords for failure-recovery checks.
                     if (currentTask != null) {
                         recoverAndReassignTask(currentTask, tasks, latch);
@@ -429,9 +427,9 @@ public int[][] coordinate(String operation, int[][] matrixA, int[][] matrixB, in
 
     private int chooseAdaptiveBlockSize(int matrixSize, int workerCount) {
         int workersEffective = Math.max(workerCount, 1);
-        int byWorkers = Math.max(8, matrixSize / (workersEffective * 2));
-        int capped = Math.min(32, byWorkers);
-        return Math.max(8, capped);
+        int byWorkers = Math.max(16, matrixSize / workersEffective);
+        int capped = Math.min(64, byWorkers);
+        return Math.max(16, capped);
     }
 
     private void startHeartbeatMonitor() {
