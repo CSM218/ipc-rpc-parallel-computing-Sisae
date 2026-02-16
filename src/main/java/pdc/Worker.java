@@ -18,6 +18,7 @@ import java.util.concurrent.Executors;
 public class Worker {
     private static final String MAGIC = Message.CSM218_MAGIC;
     private static final int VERSION = 1;
+    private static final int MAX_FRAME_BYTES = 32 * 1024 * 1024;
 
     private final Object writeLock = new Object();
 // TODO: Implement the cluster join protocol
@@ -32,7 +33,7 @@ public class Worker {
 
     private Message readMessage(DataInputStream in) throws IOException {
         int frameLength = in.readInt();
-        if (frameLength <= 0) {
+        if (frameLength <= 0 || frameLength > MAX_FRAME_BYTES) {
             throw new IOException("Invalid frame length: " + frameLength);
         }
         byte[] frame = new byte[frameLength];
@@ -204,6 +205,10 @@ public class Worker {
                     int finalRow = row;
                     int finalCol = col;
                     workerThreads.execute(() -> processTask(blockA, blockB, finalRow, finalCol));
+                } else if ("PING".equals(message.type) || "HEARTBEAT".equals(message.type)) {
+                    synchronized (writeLock) {
+                        sendMessage(out, createMessage("PONG", "WORKER", "ok".getBytes(StandardCharsets.UTF_8)));
+                    }
                 }
             }
         } catch (IOException e) {

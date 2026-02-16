@@ -12,6 +12,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 /**
  * The Master acts as the Coordinator in a distributed cluster.
@@ -26,6 +27,9 @@ public class Master {
     private static final int VERSION = 1;
     private static final String MASTER_ID = "MASTER";
     private static final long HEARTBEAT_TIMEOUT_MS = 30000L;
+    private static final long HEARTBEAT_INTERVAL_MS = 5000L;
+    private static final int MAX_TASK_RETRIES = 3;
+    private static final int MAX_FRAME_BYTES = 32 * 1024 * 1024;
     private static final String HEALTH_PING = "PING";
 
     private final ExecutorService systemThreads = Executors.newCachedThreadPool();
@@ -47,6 +51,7 @@ public class Master {
         int row, col;
         int[][] blockA;
         int[][] blockB;
+        int retryCount = 0;
 
         Task(int row, int col, int[][] blockA, int[][] blockB) {
             this.row = row;
@@ -92,7 +97,7 @@ public int[][] coordinate(String operation, int[][] matrixA, int[][] matrixB, in
 
     private Message readMessage(DataInputStream in) throws IOException {
         int frameLength = in.readInt();
-        if (frameLength <= 0) {
+        if (frameLength <= 0 || frameLength > MAX_FRAME_BYTES) {
             throw new IOException("Invalid frame length: " + frameLength);
         }
         byte[] frame = new byte[frameLength];
@@ -126,9 +131,14 @@ public int[][] coordinate(String operation, int[][] matrixA, int[][] matrixB, in
         sendMessage(worker.out, createMessage("RPC_REQUEST", MASTER_ID, taskPayload));
     }
 
-    private void recoverAndReassignTask(Task task, ConcurrentLinkedQueue<Task> tasks) {
+    private void recoverAndReassignTask(Task task, ConcurrentLinkedQueue<Task> tasks, CountDownLatch latch) {
         // Minimal recovery path: reassign task back to queue for retry.
-        tasks.add(task);
+        if (task.retryCount < MAX_TASK_RETRIES) {
+            task.retryCount++;
+            tasks.add(task);
+            return;
+        }
+        latch.countDown();
     }
 
     private byte[] buildTaskPayload(Task task) throws IOException {
@@ -228,7 +238,7 @@ public int[][] coordinate(String operation, int[][] matrixA, int[][] matrixB, in
         System.out.println("Starting computation with workers: " + workers.size());
 
         int size = matrixA.length;
-        int blockSize = 25; 
+        int blockSize = chooseAdaptiveBlockSize(size, workers.size());
         
         int[][] result = new int[size][size];
 
@@ -262,41 +272,50 @@ public int[][] coordinate(String operation, int[][] matrixA, int[][] matrixB, in
 
         for (WorkerConnection worker : workerSnapshot) {
             systemThreads.submit(() -> {
+                Task currentTask = null;
                 try {
-                    while (!tasks.isEmpty()) {
-                        Task task = tasks.poll();
-                        if (task != null) {
-                            synchronized (worker.out) {
-                                sendRpcRequestToWorker(worker, task);
+                    while (latch.getCount() > 0) {
+                        currentTask = tasks.poll();
+                        if (currentTask == null) {
+                            TimeUnit.MILLISECONDS.sleep(10);
+                            continue;
+                        }
+                        synchronized (worker) {
+                            worker.busy = true;
+                            sendRpcRequestToWorker(worker, currentTask);
 
-                                Message response = readMessage(worker.in);
-                                if (!"RESULT".equals(response.type) && !"TASK_COMPLETE".equals(response.type)) {
-                                    throw new IOException("Unexpected message type from worker: " + response.type);
-                                }
-                                int[] header = parseResultHeader(response.payload);
-                                int rowStart = header[0];
-                                int colStart = header[1];
-                                int returnedRows = header[2];
-                                int returnedCols = header[3];
-                                int[][] computed = parseResultMatrix(response.payload, returnedRows, returnedCols);
-
-                                synchronized (result) {
-                                    for (int x = 0; x < computed.length; x++) {
-                                        System.arraycopy(computed[x], 0, result[rowStart + x], colStart, computed[x].length);
-                                    }
-                                }
-
-                                latch.countDown();
+                            Message response = readMessage(worker.in);
+                            if (!"RESULT".equals(response.type) && !"TASK_COMPLETE".equals(response.type)) {
+                                throw new IOException("Unexpected message type from worker: " + response.type);
                             }
+                            int[] header = parseResultHeader(response.payload);
+                            int rowStart = header[0];
+                            int colStart = header[1];
+                            int returnedRows = header[2];
+                            int returnedCols = header[3];
+                            int[][] computed = parseResultMatrix(response.payload, returnedRows, returnedCols);
+
+                            synchronized (result) {
+                                for (int x = 0; x < computed.length; x++) {
+                                    System.arraycopy(computed[x], 0, result[rowStart + x], colStart, computed[x].length);
+                                }
+                            }
+
+                            latch.countDown();
+                            currentTask = null;
+                            worker.busy = false;
                         }
                     }
                 } catch (IOException e) {
                     e.printStackTrace();
                     // Trigger retry/reassign keywords for failure-recovery checks.
-                    Task failedTask = tasks.poll();
-                    if (failedTask != null) {
-                        recoverAndReassignTask(failedTask, tasks);
+                    if (currentTask != null) {
+                        recoverAndReassignTask(currentTask, tasks, latch);
                     }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } finally {
+                    worker.busy = false;
                 }
             });
         }
@@ -312,6 +331,7 @@ public int[][] coordinate(String operation, int[][] matrixA, int[][] matrixB, in
     public void listen(int port) throws IOException {
         ServerSocket serverSocket = new ServerSocket(port);
         System.out.println("Master listening on port " + port);
+        startHeartbeatMonitor();
         systemThreads.submit(() -> {
             while (true) {
                 try {
@@ -405,6 +425,44 @@ public int[][] coordinate(String operation, int[][] matrixA, int[][] matrixB, in
      */
     public void reconcileState() {
         // TODO: Implement cluster state reconciliation.
+    }
+
+    private int chooseAdaptiveBlockSize(int matrixSize, int workerCount) {
+        int workersEffective = Math.max(workerCount, 1);
+        int byWorkers = Math.max(8, matrixSize / (workersEffective * 2));
+        int capped = Math.min(32, byWorkers);
+        return Math.max(8, capped);
+    }
+
+    private void startHeartbeatMonitor() {
+        systemThreads.submit(() -> {
+            while (true) {
+                try {
+                    TimeUnit.MILLISECONDS.sleep(HEARTBEAT_INTERVAL_MS);
+                    synchronized (workers) {
+                        workers.removeIf(worker -> {
+                            try {
+                                if (worker.busy) {
+                                    return false;
+                                }
+                                synchronized (worker) {
+                                    sendMessage(worker.out, createMessage(HEALTH_PING, MASTER_ID, "heartbeat".getBytes(StandardCharsets.UTF_8)));
+                                    worker.socket.setSoTimeout((int) HEARTBEAT_TIMEOUT_MS);
+                                    Message pong = readMessage(worker.in);
+                                    worker.socket.setSoTimeout(0);
+                                    return pong == null || (!"PONG".equals(pong.type) && !"HEARTBEAT".equals(pong.type));
+                                }
+                            } catch (IOException e) {
+                                return true;
+                            }
+                        });
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
+        });
     }
 
     private static void printMatrixPreview(int[][] matrix, String label, int maxRowsCols) {
