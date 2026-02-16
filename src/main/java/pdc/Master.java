@@ -1,12 +1,12 @@
 package pdc;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.nio.charset.StandardCharsets;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
@@ -392,9 +392,7 @@ public int[][] coordinate(String operation, int[][] matrixA, int[][] matrixB, in
             System.out.println("Master finished printing result matrix.");
         } catch (IllegalStateException e) {
             System.out.println("Computation not started: " + e.getMessage());
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-    }
+        }
 }
     /**
      * System Health Check.
