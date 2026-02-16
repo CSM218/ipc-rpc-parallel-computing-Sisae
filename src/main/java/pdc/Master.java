@@ -56,12 +56,22 @@ public class Master {
         }
     }
 
-public int[][] coordinate(String operation, int[][] data, int workerCount) throws InterruptedException {
-    return coordinateMultiply(data, data);
+public int[][] coordinate(String operation, int[][] data, int workerCount) {
+    try {
+        return coordinateMultiply(data, data);
+    } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        return null;
+    }
 }
 
-public int[][] coordinate(String operation, int[][] matrixA, int[][] matrixB, int workerCount) throws InterruptedException {
-    return coordinateMultiply(matrixA, matrixB);
+public int[][] coordinate(String operation, int[][] matrixA, int[][] matrixB, int workerCount) {
+    try {
+        return coordinateMultiply(matrixA, matrixB);
+    } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        return null;
+    }
 }
 
 
