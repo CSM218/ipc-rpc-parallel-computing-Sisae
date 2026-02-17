@@ -4,6 +4,7 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.lang.management.ManagementFactory;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
@@ -101,7 +102,8 @@ public class Worker {
             in = new DataInputStream(socket.getInputStream());
             out = new DataOutputStream(socket.getOutputStream());
 
-            String WorkerId = configuredWorkerId != null ? configuredWorkerId : "WORKER-" + Thread.currentThread().getId();
+            String WorkerId = configuredWorkerId != null ? configuredWorkerId
+                    : "WORKER-" + ManagementFactory.getRuntimeMXBean().getName();
             
             int cores = Runtime.getRuntime().availableProcessors();
             long memory = Runtime.getRuntime().maxMemory();

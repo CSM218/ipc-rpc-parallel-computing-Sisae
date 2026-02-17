@@ -231,9 +231,6 @@ public int[][] coordinate(String operation, int[][] matrixA, int[][] matrixB, in
     private int[][] coordinateMultiply(int[][] matrixA, int[][] matrixB) throws InterruptedException {
         // TODO: Architect a scheduling algorithm that survives worker failure.
         // HINT: Think about how MapReduce or Spark handles 'Task Reassignment'.
-        if (workers.isEmpty()) {
-            return null;
-        }
         System.out.println("Waiting for at least " + MIN_REQUIRED_WORKERS + " workers before computation...");
         long waitStartMillis = System.currentTimeMillis();
         while (workers.size() < MIN_REQUIRED_WORKERS) {
