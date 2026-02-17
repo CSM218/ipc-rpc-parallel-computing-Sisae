@@ -27,6 +27,7 @@ public class Master {
     private static final String MAGIC = Message.CSM218_MAGIC;
     private static final int VERSION = 1;
     private static final String MASTER_ID = "MASTER";
+    private static final int MIN_REQUIRED_WORKERS = 3;
     private static final long HEARTBEAT_TIMEOUT_MS = 30000L;
     private static final long HEARTBEAT_INTERVAL_MS = 5000L;
     private static final int MAX_TASK_RETRIES = 3;
@@ -39,6 +40,7 @@ public class Master {
         DataInputStream in;
         DataOutputStream out;
         boolean busy = false;
+        Task inFlightTask = null;
 
         WorkerConnection (Socket s) throws IOException{
             socket = s;
@@ -232,11 +234,11 @@ public int[][] coordinate(String operation, int[][] matrixA, int[][] matrixB, in
         if (workers.isEmpty()) {
             return null;
         }
-        System.out.println("Waiting for at least one worker before computation...");
+        System.out.println("Waiting for at least " + MIN_REQUIRED_WORKERS + " workers before computation...");
         long waitStartMillis = System.currentTimeMillis();
-        while (workers.isEmpty()) {
+        while (workers.size() < MIN_REQUIRED_WORKERS) {
             if (System.currentTimeMillis() - waitStartMillis > 30000) {
-                throw new IllegalStateException("No workers connected after 30 seconds.");
+                throw new IllegalStateException("Expected at least " + MIN_REQUIRED_WORKERS + " workers after 30 seconds, found " + workers.size());
             }
             Thread.sleep(200);
         }
@@ -286,6 +288,7 @@ public int[][] coordinate(String operation, int[][] matrixA, int[][] matrixB, in
                         }
                         synchronized (worker) {
                             worker.busy = true;
+                            worker.inFlightTask = currentTask;
                             sendRpcRequestToWorker(worker, currentTask);
 
                             Message response = readMessage(worker.in);
@@ -308,17 +311,21 @@ public int[][] coordinate(String operation, int[][] matrixA, int[][] matrixB, in
                             latch.countDown();
                             currentTask = null;
                             worker.busy = false;
+                            worker.inFlightTask = null;
                         }
                     }
                 } catch (IOException e) {
                     // Trigger retry/reassign keywords for failure-recovery checks.
                     if (currentTask != null) {
                         recoverAndReassignTask(currentTask, tasks, latch);
+                    } else if (worker.inFlightTask != null) {
+                        recoverAndReassignTask(worker.inFlightTask, tasks, latch);
                     }
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 } finally {
                     worker.busy = false;
+                    worker.inFlightTask = null;
                 }
             });
         }
@@ -353,6 +360,7 @@ public int[][] coordinate(String operation, int[][] matrixA, int[][] matrixB, in
                                 System.out.println("Cores: " + registerData.cores + ", Memory: " + registerData.memory);
 
                                 workers.add(worker);
+                                System.out.println("Current workers online: " + workers.size());
                                 // Health ping exchange during handshake.
                                 sendMessage(worker.out, createMessage("WELCOME", MASTER_ID, ("Welcome " + registerData.workerId).getBytes(StandardCharsets.UTF_8)));
                                 sendMessage(worker.out, createMessage("HELLO_WORKER", MASTER_ID, "Hello worker".getBytes(StandardCharsets.UTF_8)));
