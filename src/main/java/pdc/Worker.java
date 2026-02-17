@@ -232,6 +232,7 @@ public class Worker {
                 }
             }
     public static void main(String[] args) {
+        // Entry point: start worker registration then task loop.
         Worker worker = new Worker();
         String workerIdEnv = System.getenv("WORKER_ID");
         if (workerIdEnv != null && !workerIdEnv.isEmpty()) {
